@@ -1,4 +1,4 @@
-import os, re, uuid, asyncio, subprocess, threading, tempfile, json, urllib.request
+import os, re, uuid, asyncio, subprocess, threading, tempfile, json, urllib.request, urllib.error
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -41,8 +41,18 @@ def wrap(line, width=22):
 
 
 def tts(text, path):
-    import edge_tts
-    asyncio.run(edge_tts.Communicate(text, VOICE, rate="+5%").save(path))
+    import edge_tts, time
+    last = None
+    for attempt in range(4):
+        try:
+            asyncio.run(edge_tts.Communicate(text, VOICE).save(path))
+            if os.path.getsize(path) > 2000:
+                return
+            last = RuntimeError("empty audio")
+        except Exception as e:
+            last = e
+        time.sleep(3 * (attempt + 1))
+    raise last
 
 
 def duration(path):
@@ -96,7 +106,10 @@ def upload(job_id, path):
                                  data=open(path, "rb").read(), method="POST",
                                  headers={"Authorization": f"Bearer {SB_KEY}", "apikey": SB_KEY,
                                           "Content-Type": "video/mp4", "x-upsert": "true"})
-    urllib.request.urlopen(req, timeout=120).read()
+    try:
+        urllib.request.urlopen(req, timeout=120).read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"upload {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}")
     return f"{SB_URL}/storage/v1/object/public/{BUCKET}/{name}"
 
 
