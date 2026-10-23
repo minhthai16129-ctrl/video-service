@@ -51,31 +51,39 @@ def duration(path):
     return float(r.stdout.strip())
 
 
+def ass_time(t):
+    h, m = int(t // 3600), int(t % 3600 // 60)
+    return f"{h}:{m:02d}:{t % 60:05.2f}"
+
+
 def render(job_id, title, script, tts_fn=tts):
     tmp = tempfile.mkdtemp()
-    audio, out = f"{tmp}/a.mp3", f"{tmp}/v.mp4"
+    audio, out, ass = f"{tmp}/a.mp3", f"{tmp}/v.mp4", f"{tmp}/s.ass"
     tts_fn(script, audio)
     total = duration(audio)
     sents = split_sentences(script)
     weights = [max(len(s), 1) for s in sents]
-    t, filters = 0.0, []
-    for i, (s, w) in enumerate(zip(sents, weights)):
+    lines = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 720", "PlayResY: 1280", "WrapStyle: 2", "",
+             "[V4+ Styles]",
+             "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
+             "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,"
+             "MarginV,Encoding",
+             "Style: Sub,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,3,10,0,5,50,50,0,1",
+             "Style: Title,DejaVu Sans,38,&H0047E0FD,&H0047E0FD,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,50,50,140,1",
+             "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text"]
+    lines.append(f"Dialogue: 0,{ass_time(0)},{ass_time(total + 0.5)},Title,,0,0,0,,{wrap(title, 26).replace(chr(10), chr(92) + 'N')}")
+    t = 0.0
+    for s, w in zip(sents, weights):
         d = total * w / sum(weights)
-        tf = f"{tmp}/s{i}.txt"
-        open(tf, "w", encoding="utf-8").write(wrap(s))
-        filters.append(
-            f"drawtext=fontfile={FONT}:textfile={tf}:fontsize=64:fontcolor=white:"
-            f"line_spacing=14:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.35:"
-            f"boxborderw=24:enable='between(t,{t:.2f},{t + d:.2f})'")
+        lines.append(f"Dialogue: 1,{ass_time(t)},{ass_time(t + d)},Sub,,0,0,0,,{wrap(s, 20).replace(chr(10), chr(92) + 'N')}")
         t += d
-    tf = f"{tmp}/title.txt"
-    open(tf, "w", encoding="utf-8").write(wrap(title, 26))
-    filters.append(f"drawtext=fontfile={FONT}:textfile={tf}:fontsize=52:fontcolor=0xfde047:"
-                   f"x=(w-text_w)/2:y=200")
-    color = COLORS[hash(job_id) % len(COLORS)]
-    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=1080x1920:r=24:d={total + 0.5:.2f}",
-           "-i", audio, "-vf", ",".join(filters), "-c:v", "libx264", "-preset", "veryfast",
-           "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-movflags", "+faststart", out]
+    open(ass, "w", encoding="utf-8").write("\n".join(lines))
+    color = COLORS[sum(map(ord, job_id)) % len(COLORS)]
+    cmd = ["ffmpeg", "-y", "-threads", "1", "-f", "lavfi", "-i", f"color=c={color}:s=720x1280:r=15:d={total + 0.5:.2f}",
+           "-i", audio, "-vf", f"subtitles={ass}:fontsdir=/usr/share/fonts/truetype/dejavu",
+           "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "30", "-threads", "1",
+           "-x264-params", "rc-lookahead=0:sync-lookahead=0:bframes=0", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-b:a", "96k", "-shortest", "-movflags", "+faststart", out]
     subprocess.run(cmd, check=True, capture_output=True)
     return out
 
