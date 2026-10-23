@@ -63,11 +63,23 @@ def duration(path):
 
 
 def fetch_images(keywords, tmp, n=4):
-    if not PEXELS_KEY or not keywords:
+    if not keywords:
         return []
     paths = []
     for i, kw in enumerate(keywords[:n]):
         try:
+            if not PEXELS_KEY:
+                prompt = urllib.parse.quote(kw.strip() + ", futuristic technology, cinematic, vertical poster, no text")
+                img = urllib.request.Request(
+                    f"https://image.pollinations.ai/prompt/{prompt}?width=720&height=1280&nologo=true&seed={i + 7}",
+                    headers={"User-Agent": "Mozilla/5.0"})
+                data = urllib.request.urlopen(img, timeout=60).read()
+                if len(data) < 5000:
+                    continue
+                p = f"{tmp}/img{i}.jpg"
+                open(p, "wb").write(data)
+                paths.append(p)
+                continue
             q = urllib.parse.quote(kw.strip())
             req = urllib.request.Request(
                 f"https://api.pexels.com/v1/search?query={q}&orientation=portrait&per_page=3&size=medium",
