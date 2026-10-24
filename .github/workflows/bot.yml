@@ -1,0 +1,36 @@
+name: Bot quản lý kênh
+
+on:
+  schedule:
+    - cron: "15 */6 * * *"   # mỗi 6 giờ: thống kê, link tiếp thị, gợi ý trả lời bình luận
+    - cron: "0 1 * * 1"      # thứ Hai 08:00 giờ Việt Nam: báo cáo tuần
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "stats | affiliate | comments | report | all"
+        default: "all"
+
+concurrency:
+  group: kenh-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+      - run: pip install -r bot/requirements.txt
+      - name: Chạy bot
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+          TASK: ${{ github.event.inputs.task || (github.event.schedule == '0 1 * * 1' && 'report' || 'all') }}
+        run: python bot/bot.py "$TASK"
