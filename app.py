@@ -62,39 +62,44 @@ def duration(path):
     return float(r.stdout.strip())
 
 
-def fetch_images(keywords, tmp, n=4):
+def fetch_one(i, kw, tmp):
+    p = f"{tmp}/img{i}.jpg"
+    if PEXELS_KEY:
+        q = urllib.parse.quote(kw.strip())
+        req = urllib.request.Request(
+            f"https://api.pexels.com/v1/search?query={q}&orientation=portrait&per_page=3&size=medium",
+            headers={"Authorization": PEXELS_KEY, "User-Agent": "Mozilla/5.0"})
+        photos = (json.loads(urllib.request.urlopen(req, timeout=20).read()).get("photos") or [])
+        if not photos:
+            return None
+        url = photos[0]["src"]["portrait"]
+    else:
+        prompt = urllib.parse.quote(kw.strip() + ", futuristic technology, cinematic, vertical poster, no text")
+        url = f"https://image.pollinations.ai/prompt/{prompt}?width=720&height=1280&nologo=true&seed={i + 7}"
+    data = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=40).read()
+    if len(data) < 5000:
+        return None
+    open(p, "wb").write(data)
+    return p
+
+
+def fetch_images(keywords, tmp, n=4, deadline=75):
     if not keywords:
         return []
-    paths = []
-    for i, kw in enumerate(keywords[:n]):
+    from concurrent.futures import ThreadPoolExecutor, wait
+    ex = ThreadPoolExecutor(max_workers=4)
+    futs = [ex.submit(fetch_one, i, kw, tmp) for i, kw in enumerate(keywords[:n])]
+    wait(futs, timeout=deadline)
+    ex.shutdown(wait=False, cancel_futures=True)
+    out = []
+    for f in futs:
         try:
-            if not PEXELS_KEY:
-                prompt = urllib.parse.quote(kw.strip() + ", futuristic technology, cinematic, vertical poster, no text")
-                img = urllib.request.Request(
-                    f"https://image.pollinations.ai/prompt/{prompt}?width=720&height=1280&nologo=true&seed={i + 7}",
-                    headers={"User-Agent": "Mozilla/5.0"})
-                data = urllib.request.urlopen(img, timeout=60).read()
-                if len(data) < 5000:
-                    continue
-                p = f"{tmp}/img{i}.jpg"
-                open(p, "wb").write(data)
-                paths.append(p)
-                continue
-            q = urllib.parse.quote(kw.strip())
-            req = urllib.request.Request(
-                f"https://api.pexels.com/v1/search?query={q}&orientation=portrait&per_page=3&size=medium",
-                headers={"Authorization": PEXELS_KEY, "User-Agent": "Mozilla/5.0"})
-            data = json.loads(urllib.request.urlopen(req, timeout=20).read())
-            photos = data.get("photos") or []
-            if not photos:
-                continue
-            img = urllib.request.Request(photos[0]["src"]["portrait"], headers={"User-Agent": "Mozilla/5.0"})
-            p = f"{tmp}/img{i}.jpg"
-            open(p, "wb").write(urllib.request.urlopen(img, timeout=30).read())
-            paths.append(p)
-        except Exception:
-            continue
-    return paths
+            if f.done() and f.result():
+                out.append(f.result())
+        except Exception as e:
+            print("image fail:", str(e)[:150], flush=True)
+    print(f"images ok: {len(out)}/{len(futs)}", flush=True)
+    return out
 
 
 def ass_time(t):
@@ -167,12 +172,25 @@ def upload(job_id, path):
     return f"{SB_URL}/storage/v1/object/public/{BUCKET}/{name}"
 
 
+RENDER_LOCK = threading.Lock()
+
+
+RENDER_LOCK = threading.Lock()
+
+
 def work(job_id, title, script, keywords=None):
-    try:
-        path = render(job_id, title, script, keywords=keywords)
-        JOBS[job_id] = {"status": "done", "url": upload(job_id, path)}
-    except Exception as e:
-        JOBS[job_id] = {"status": "error", "error": str(e)[:300]}
+    with RENDER_LOCK:
+        try:
+            print("job start", job_id, keywords, flush=True)
+            path = render(job_id, title, script, keywords=keywords)
+            JOBS[job_id] = {"status": "done", "url": upload(job_id, path)}
+            print("job done", job_id, flush=True)
+        except Exception as e:
+            err = str(e)
+            if hasattr(e, "stderr") and e.stderr:
+                err += " | " + e.stderr.decode("utf-8", "ignore")[-300:]
+            print("job error", job_id, err[:600], flush=True)
+            JOBS[job_id] = {"status": "error", "error": err[:300]}
 
 
 @app.get("/")
