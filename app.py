@@ -5,6 +5,7 @@ app = Flask(__name__)
 JOBS = {}
 SECRET = os.environ.get("API_SECRET", "")
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
+PIXABAY_KEY = os.environ.get("PIXABAY_API_KEY", "")
 SB_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "")
 BUCKET = os.environ.get("SUPABASE_BUCKET", "videos")
@@ -64,7 +65,16 @@ def duration(path):
 
 def fetch_one(i, kw, tmp):
     p = f"{tmp}/img{i}.jpg"
-    if PEXELS_KEY:
+    if PIXABAY_KEY:
+        q = urllib.parse.quote(kw.strip())
+        req = urllib.request.Request(
+            f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={q}&image_type=photo&orientation=vertical&safesearch=true&per_page=6",
+            headers={"User-Agent": "Mozilla/5.0"})
+        hits = json.loads(urllib.request.urlopen(req, timeout=20).read()).get("hits") or []
+        if not hits:
+            return None
+        url = hits[i % len(hits)].get("largeImageURL") or hits[0]["webformatURL"]
+    elif PEXELS_KEY:
         q = urllib.parse.quote(kw.strip())
         req = urllib.request.Request(
             f"https://api.pexels.com/v1/search?query={q}&orientation=portrait&per_page=3&size=medium",
@@ -83,7 +93,7 @@ def fetch_one(i, kw, tmp):
     return p
 
 
-def fetch_images(keywords, tmp, n=4, deadline=75):
+def fetch_images(keywords, tmp, n=6, deadline=75):
     if not keywords:
         return []
     from concurrent.futures import ThreadPoolExecutor, wait
@@ -136,15 +146,18 @@ def render(job_id, title, script, tts_fn=tts, keywords=None, fetch_fn=fetch_imag
            "-c:a", "aac", "-b:a", "96k", "-shortest", "-movflags", "+faststart", out]
     if imgs:
         d = (total + 0.5) / len(imgs)
+        nf = max(int(d * 15), 15)
         cmd = ["ffmpeg", "-y", "-threads", "1"]
         for p in imgs:
-            cmd += ["-loop", "1", "-framerate", "15", "-t", f"{d:.2f}", "-i", p]
+            cmd += ["-i", p]
         cmd += ["-i", audio]
         parts = []
         for i in range(len(imgs)):
-            parts.append(f"[{i}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,"
-                         f"fps=15,eq=brightness=-0.22:saturation=0.9,"
-                         f"fade=t=in:st=0:d=0.4,fade=t=out:st={max(d - 0.4, 0):.2f}:d=0.4[v{i}]")
+            zoom = f"min(zoom+0.0012,1.2)" if i % 2 == 0 else f"if(eq(on,0),1.2,max(zoom-0.0012,1.0))"
+            parts.append(f"[{i}:v]scale=864:1536:force_original_aspect_ratio=increase,crop=864:1536,setsar=1,"
+                         f"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={nf}:s=720x1280:fps=15,"
+                         f"eq=brightness=-0.22:saturation=0.9,"
+                         f"fade=t=in:st=0:d=0.4,fade=t=out:st={max(nf / 15 - 0.4, 0):.2f}:d=0.4[v{i}]")
         concat = "".join(f"[v{i}]" for i in range(len(imgs)))
         parts.append(f"{concat}concat=n={len(imgs)}:v=1:a=0[bg];[bg]{sub}[vout]")
         cmd += ["-filter_complex", ";".join(parts), "-map", "[vout]", "-map", f"{len(imgs)}:a"] + enc
