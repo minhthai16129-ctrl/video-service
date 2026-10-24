@@ -122,6 +122,21 @@ def render(job_id, title, script, tts_fn=tts, keywords=None, fetch_fn=fetch_imag
     audio, out, ass = f"{tmp}/a.mp3", f"{tmp}/v.mp4", f"{tmp}/s.ass"
     tts_fn(script, audio)
     total = duration(audio)
+    try:
+        mixed = f"{tmp}/mix.m4a"
+        chord = ("0.5*sin(2*PI*130.81*t)+0.35*sin(2*PI*164.81*t)+0.35*sin(2*PI*196*t)"
+                 "+0.2*sin(2*PI*261.63*t*(1+0.002*sin(2*PI*0.2*t)))")
+        subprocess.run(["ffmpeg", "-y", "-threads", "1", "-i", audio, "-f", "lavfi", "-i",
+                        f"aevalsrc={chord}:s=24000:d={total + 1:.2f}",
+                        "-filter_complex",
+                        "[1:a]lowpass=f=700,tremolo=f=0.15:d=0.4,volume=0.12,"
+                        f"afade=t=in:d=2,afade=t=out:st={max(total - 2, 0):.2f}:d=2[m];"
+                        "[0:a][m]amix=inputs=2:duration=first:normalize=0[o]",
+                        "-map", "[o]", "-c:a", "aac", "-b:a", "96k", mixed],
+                       check=True, capture_output=True)
+        audio = mixed
+    except Exception as e:
+        print("music skipped:", str(e)[:150], flush=True)
     sents = split_sentences(script)
     weights = [max(len(s), 1) for s in sents]
     lines = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 720", "PlayResY: 1280", "WrapStyle: 2", "",
