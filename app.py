@@ -42,13 +42,19 @@ def wrap(line, width=22):
     return "\n".join(lines)
 
 
+VOICES = ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]
+
+
 def tts(text, path):
     import edge_tts, time
+    pick = VOICES[sum(map(ord, text[:40])) % len(VOICES)]
     last = None
     for attempt in range(4):
+        voice = pick if attempt < 2 else VOICES[0]
         try:
-            asyncio.run(edge_tts.Communicate(text, VOICE).save(path))
+            asyncio.run(edge_tts.Communicate(text, voice, rate="+6%").save(path))
             if os.path.getsize(path) > 2000:
+                print("voice", voice, flush=True)
                 return
             last = RuntimeError("empty audio")
         except Exception as e:
