@@ -409,6 +409,19 @@ TASKS = {"stats": task_stats, "affiliate": task_affiliate, "comments": task_comm
          "draft_posts": task_draft_posts, "publish_posts": task_publish_posts}
 
 
+NEEDS = {"stats": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY"],
+         "affiliate": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
+         "comments": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY", "GEMINI_API_KEY"],
+         "report": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
+         "draft_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
+         "publish_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "FB_PAGE_TOKEN"]}
+
+
+def gha_error(title, msg):
+    """In ra dạng chú thích của GitHub Actions để dễ đọc ở trang tóm tắt lần chạy."""
+    print(f"::error title={title}::{msg}".replace("\n", " "))
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     names = ["stats", "affiliate", "comments", "draft_posts"] if which == "all" else [which]
@@ -418,10 +431,19 @@ def main():
             print("không có tác vụ", n)
             failed.append(n)
             continue
+        missing = [k for k in NEEDS.get(n, []) if not os.environ.get(k)]
+        if missing:
+            gha_error(f"Thiếu secret cho {n}", "Chưa có: " + ", ".join(missing))
+            failed.append(n)
+            continue
         try:
             TASKS[n]()
         except Exception as e:  # một tác vụ lỗi không chặn các tác vụ còn lại
-            print(f"LỖI {n}: {type(e).__name__}: {str(e)[:300]}")
+            msg = f"{type(e).__name__}: {str(e)[:300]}"
+            if isinstance(e, requests.HTTPError) and e.response is not None:
+                msg += " | " + e.response.text[:250]
+            print(f"LỖI {n}: {msg}")
+            gha_error(f"Lỗi tác vụ {n}", msg)
             failed.append(n)
     if failed:
         sys.exit(1)
