@@ -19,7 +19,6 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    environment: video-service   # các secret của bạn nằm trong Environment "video-service"
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
