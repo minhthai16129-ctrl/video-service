@@ -438,6 +438,9 @@ def main():
             failed.append(n)
             continue
         missing = [k for k in NEEDS.get(n, []) if not os.environ.get(k)]
+        if n == "publish_posts" and missing == ["FB_PAGE_TOKEN"]:
+            print("publish_posts: chưa có FB_PAGE_TOKEN, bỏ qua (bài đăng tay)")
+            continue
         if missing:
             gha_error(f"Thiếu secret cho {n}", "Chưa có: " + ", ".join(missing))
             failed.append(n)
