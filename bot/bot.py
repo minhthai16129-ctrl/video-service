@@ -309,6 +309,12 @@ def pixabay_photo(keyword):
     return hits[0].get("largeImageURL", "") if hits else ""
 
 
+def clean_post(text):
+    """Bỏ các dòng nhãn nền tảng (TikTok:/Facebook:/YouTube:) nếu Gemini lỡ chép từ ghi chú biên tập."""
+    lines = [l for l in text.strip().splitlines() if not re.match(r"^\s*(tiktok|facebook|youtube)\s*:", l, re.I)]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def task_draft_posts():
     posts = load_posts()
     open_n = sum(1 for p in posts if p["status"] in ("Chờ duyệt", "Chờ đăng"))
@@ -327,18 +333,18 @@ def task_draft_posts():
     res = gemini_json(
         f"Hôm nay là {today}. Bạn quản lý một Fanpage tiếng Việt về mẹo hay, đời sống, mua sắm thông minh, tin thú vị. "
         "Mục tiêu: bài viết ngắn khiến nhiều người bình luận, thích và chia sẻ. Chọn MỘT chủ đề đang được quan tâm "
-        "rộng rãi từ dữ liệu bên dưới và viết bài.\n"
-        f"Ưu tiên ghi tay của biên tập: {cell(hand, 0)[:600]}\n"
+        "rộng rãi từ dữ liệu bên dưới và viết bài. Bài chỉ gồm nội dung đăng, không có nhãn nền tảng như TikTok:, Facebook:, YouTube:.\n"
+        f"Ưu tiên ghi tay của biên tập (chỉ để tham khảo chủ đề, KHÔNG chép lại nguyên văn, bỏ qua nếu là mẫu trống): {cell(hand, 0)[:600]}\n"
         f"Từ khóa thịnh hành Google Trends VN: {trends}\nTin nổi bật Google News VN: {news}\n"
         f"Các bài gần đây, KHÔNG lặp chủ đề:\n{recent}\n\n"
         "Chọn một dạng bài khác các bài gần đây: câu hỏi gây tranh luận nhẹ, mẹo 3 ý, kể chuyện ngắn, "
         "bình chọn A hay B, sự thật thú vị. Văn nói gần gũi, 400-700 ký tự, xuống dòng cho dễ đọc, 1-3 emoji, "
         "kết bằng câu hỏi mời bình luận, thêm 3-5 hashtag cuối bài. TRÁNH: chính trị, tôn giáo, tai nạn, án mạng, "
-        "scandal hay buộc tội người thật, tin đồn, 18+, lời khuyên y tế hoặc đầu tư cụ thể, hứa hẹn kiếm tiền. "
+        "scandal hay buộc tội người thật, tin đồn, 18+, lời khuyên y tế hoặc đầu tư, giá vàng/bạc, chứng khoán, tiền ảo, hứa hẹn kiếm tiền. "
         "Chỉ nêu thông tin có trong dữ liệu hoặc chắc chắn đúng, không bịa số liệu, tên người, trích dẫn. Không dùng markdown.\n"
         'Trả về JSON: {"topic": "chủ đề tối đa 10 từ", "text": "nội dung bài", '
         '"image_keyword": "1-2 từ khóa tiếng Anh đơn giản để tìm ảnh minh họa, hoặc rỗng nếu không cần ảnh"}')
-    text = (res.get("text") or "").strip()
+    text = clean_post(res.get("text") or "")
     if len(text) < 80:
         print("draft_posts: Gemini trả về bài quá ngắn, bỏ qua")
         return
