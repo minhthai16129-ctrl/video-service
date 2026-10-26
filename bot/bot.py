@@ -68,7 +68,7 @@ def sheet_put(rng, values):
 
 def sheet_append(rng, values):
     r = requests.post(f"{SHEETS}/{SHEET}/values/{urllib.parse.quote(rng)}:append", headers=_headers(),
-                      params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"},
+                      params={"valueInputOption": "RAW", "insertDataOption": "OVERWRITE"},
                       json={"values": values}, timeout=30)
     r.raise_for_status()
 
