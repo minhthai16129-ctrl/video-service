@@ -4,10 +4,12 @@ on:
   schedule:
     - cron: "15 */6 * * *"   # mỗi 6 giờ: thống kê, link tiếp thị, gợi ý trả lời bình luận
     - cron: "0 1 * * 1"      # thứ Hai 08:00 giờ Việt Nam: báo cáo tuần
+    - cron: "40 5 * * *"     # 12:40 giờ Việt Nam: đăng bài Facebook đã duyệt
+    - cron: "40 13 * * *"    # 20:40 giờ Việt Nam: đăng bài Facebook đã duyệt
   workflow_dispatch:
     inputs:
       task:
-        description: "stats | affiliate | comments | report | all"
+        description: "stats | affiliate | comments | report | draft_posts | publish_posts | all"
         default: "all"
 
 concurrency:
@@ -32,5 +34,8 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
-          TASK: ${{ github.event.inputs.task || (github.event.schedule == '0 1 * * 1' && 'report' || 'all') }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          FORCE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          TASK: ${{ github.event.inputs.task || (github.event.schedule == '0 1 * * 1' && 'report' || (github.event.schedule == '40 5 * * *' || github.event.schedule == '40 13 * * *') && 'publish_posts' || 'all') }}
         run: python bot/bot.py "$TASK"
