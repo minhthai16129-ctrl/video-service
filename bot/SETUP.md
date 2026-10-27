@@ -45,6 +45,12 @@ Không đưa các giá trị này vào chat hay vào mã nguồn.
 5. Tạo thêm secret `FB_PAGE_TOKEN` = mã Page đó. (Tùy chọn) `PIXABAY_API_KEY` = khóa Pixabay để bài có ảnh minh họa.
 Bot dùng đúng Page có ID `1401373186393078`. Đổi bằng biến `FB_PAGE_ID` nếu cần. Không đưa mã vào chat hay mã nguồn.
 
+## Bước 5c. Tự lấy link Shopee Affiliate (tùy chọn)
+1. Đăng nhập https://affiliate.shopee.vn, vào mục **Open API** (menu "Công cụ" hoặc đường dẫn affiliate.shopee.vn/open_api). Nếu chưa dùng được, gửi yêu cầu cấp quyền theo hướng dẫn ngay trên trang đó.
+2. Lấy **App ID** và **Secret**.
+3. Tạo hai secret trong GitHub: `SHOPEE_APP_ID`, `SHOPEE_SECRET`.
+Bot sẽ tìm sản phẩm Shopee liên quan, tạo link rút gọn mang mã của bạn và chèn vào mô tả video/bài viết chưa đăng, kèm ghi chú quảng cáo. Nội dung không có sản phẩm hợp lý (tin tức, cảnh báo lừa đảo...) thì bot không chèn.
+
 ## Bước 6. Chạy thử
 Tab Actions > "Bot quản lý kênh" > "Run workflow" > chọn `all`. Muốn thử riêng bài viết: chọn `draft_posts` (soạn nháp), sau đó đổi một bài sang Chờ đăng và chọn `publish_posts` (chạy tay thì đăng ngay, không chờ khung giờ). Xem log: dòng "stats:", "affiliate:", "comments:" cho biết bot làm gì.
 

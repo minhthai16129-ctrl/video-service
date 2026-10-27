@@ -24,6 +24,9 @@ FB_TOKEN = os.environ.get("FB_PAGE_TOKEN", "")
 FB_PAGE = os.environ.get("FB_PAGE_ID", "1401373186393078")
 FB_API = "https://graph.facebook.com/v21.0"
 PIXABAY = os.environ.get("PIXABAY_API_KEY", "")
+SHOPEE_ID = os.environ.get("SHOPEE_APP_ID", "")
+SHOPEE_SECRET = os.environ.get("SHOPEE_SECRET", "")
+SHOPEE_URL = "https://open-api.affiliate.shopee.vn/graphql"
 POST_TAB = "Bai viet"
 MAX_POSTS_PER_DAY = int(os.environ.get("MAX_POSTS_PER_DAY", "2"))
 MAX_OPEN_DRAFTS = 4
@@ -182,31 +185,124 @@ def affiliate_block(picks):
     return "\n\n" + "\n".join(lines) + "\n" + DISCLOSURE
 
 
+# --- Shopee Affiliate Open API (GraphQL): tìm sản phẩm theo từ khóa và tạo link tiếp thị riêng của bạn
+def shopee_call(query):
+    import hashlib
+    payload = json.dumps({"query": query}, ensure_ascii=False, separators=(",", ":"))
+    ts = str(int(time.time()))
+    sig = hashlib.sha256((SHOPEE_ID + ts + payload + SHOPEE_SECRET).encode("utf-8")).hexdigest()
+    r = requests.post(SHOPEE_URL, data=payload.encode("utf-8"), timeout=30, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_ID}, Timestamp={ts}, Signature={sig}"})
+    try:
+        d = r.json()
+    except ValueError:
+        raise RuntimeError(f"Shopee trả về không phải JSON ({r.status_code})")
+    if d.get("errors"):
+        e = d["errors"][0]
+        code = (e.get("extensions") or {}).get("code", "")
+        raise RuntimeError(f"Shopee lỗi {code}: {e.get('message', '')[:200]}")
+    return d.get("data", {})
+
+
+def shopee_search(keyword, limit=8):
+    q = ("{ productOfferV2(keyword: %s, sortType: 1, page: 1, limit: %d) { nodes { itemId productName shopName "
+         "priceMin priceMax commissionRate sales productLink offerLink } } }") % (json.dumps(keyword, ensure_ascii=False), limit)
+    return (shopee_call(q).get("productOfferV2") or {}).get("nodes") or []
+
+
+def shopee_short(url, sub):
+    q = ('mutation { generateShortLink(input: {originUrl: %s, subIds: [%s]}) { shortLink } }'
+         % (json.dumps(url), json.dumps(sub)))
+    return (shopee_call(q).get("generateShortLink") or {}).get("shortLink", "")
+
+
+def shopee_pick(title, text, sub):
+    """Chọn tối đa 1 sản phẩm Shopee THẬT SỰ liên quan nội dung; trả về [{name, link}] hoặc []."""
+    plan = gemini_json(
+        "Bạn chọn sản phẩm tiếp thị liên kết Shopee cho một nội dung ngắn tiếng Việt.\\n"
+        f"Tiêu đề: {title}\\nNội dung: {text[:500]}\\n\\n"
+        "Chỉ đề xuất nếu có một loại sản phẩm vật lý, phổ thông, liên quan TRỰC TIẾP và hữu ích cho người xem nội dung này "
+        "(ví dụ nội dung về mẹo tiết kiệm điện thì bóng đèn LED, ổ cắm đo điện). Nếu nội dung là tin tức, cảnh báo lừa đảo, "
+        "chủ đề trừu tượng, y tế, tài chính, chính trị hoặc không có sản phẩm hợp lý thì để rỗng. Không ép.\\n"
+        'Trả về JSON: {"keyword": "từ khóa tìm sản phẩm trên Shopee (tiếng Việt, 2-5 từ) hoặc rỗng"}')
+    kw = (plan.get("keyword") or "").strip()
+    if not kw:
+        return []
+    nodes = shopee_search(kw)
+    if not nodes:
+        return []
+    listing = "\\n".join(f"{i}. {n.get('productName', '')[:90]} | giá {n.get('priceMin', '')} | đã bán {n.get('sales', '')} | "
+                        f"hoa hồng {n.get('commissionRate', '')}" for i, n in enumerate(nodes))
+    ch = gemini_json(
+        f"Nội dung: {title}\\nTừ khóa: {kw}\\nDanh sách sản phẩm Shopee:\\n{listing}\\n\\n"
+        "Chọn 1 sản phẩm hợp lý nhất cho người xem (đúng loại, bán chạy, giá phải chăng, tên không đáng ngờ). "
+        "Hoa hồng chỉ dùng để chọn khi hai sản phẩm tương đương. Nếu không có sản phẩm nào thật sự phù hợp thì chọn -1.\\n"
+        'Trả về JSON: {"pick": số thứ tự hoặc -1}')
+    i = ch.get("pick")
+    if not isinstance(i, int) or not 0 <= i < len(nodes):
+        return []
+    n = nodes[i]
+    link = shopee_short(n.get("productLink") or n.get("offerLink") or "", sub)
+    return [{"name": n.get("productName", "")[:80], "link": link}] if link else []
+
+
 def task_affiliate():
     cat = load_catalog()
-    if not cat:
-        print("affiliate: danh mục trống (tab Affiliate)")
+    use_shopee = bool(SHOPEE_ID and SHOPEE_SECRET)
+    if not cat and not use_shopee:
+        print("affiliate: chưa có danh mục (tab Affiliate) và chưa có khóa Shopee (SHOPEE_APP_ID, SHOPEE_SECRET)")
         return
-    todo = [v for v in load_videos() if v["status"] in ("Chờ duyệt", "Chờ đăng") and not v["mark"].startswith(AFF_MARK)]
-    listing = "\n".join(f"{i}. {c['name']} (từ khóa: {c['kw']})" for i, c in enumerate(cat))
-    done = 0
-    for v in todo:
+    listing = "\\n".join(f"{i}. {c['name']} (từ khóa: {c['kw']})" for i, c in enumerate(cat))
+
+    def pick_manual(title, topic, desc):
+        if not cat:
+            return []
         res = gemini_json(
-            "Bạn chọn sản phẩm tiếp thị liên kết cho một video ngắn tiếng Việt.\n"
-            f"Chủ đề: {v['topic']}\nTiêu đề: {v['title']}\nMô tả: {v['desc'][:400]}\n\n"
-            f"Danh mục sản phẩm:\n{listing}\n\n"
-            "Chỉ chọn sản phẩm THẬT SỰ liên quan trực tiếp tới nội dung video và có ích cho người xem. "
-            "Không ép chọn: nếu không có thì trả về danh sách rỗng. Tối đa 2 sản phẩm.\n"
+            "Bạn chọn sản phẩm tiếp thị liên kết cho một nội dung ngắn tiếng Việt.\\n"
+            f"Chủ đề: {topic}\\nTiêu đề: {title}\\nMô tả: {desc[:400]}\\n\\n"
+            f"Danh mục sản phẩm:\\n{listing}\\n\\n"
+            "Chỉ chọn sản phẩm THẬT SỰ liên quan trực tiếp tới nội dung và có ích cho người xem. "
+            "Không ép chọn: nếu không có thì trả về danh sách rỗng. Tối đa 2 sản phẩm.\\n"
             'Trả về JSON đúng dạng: {"picks": [số thứ tự, ...]}')
         idx = [i for i in res.get("picks", []) if isinstance(i, int) and 0 <= i < len(cat)][:2]
-        if idx:
-            picks = [cat[i] for i in idx]
+        return [cat[i] for i in idx]
+
+    def pick(title, topic, desc, sub):
+        got = []
+        if use_shopee:
+            try:
+                got = shopee_pick(title, desc, sub)
+            except Exception as e:
+                print("affiliate: Shopee lỗi:", str(e)[:200])
+        return got or pick_manual(title, topic, desc)
+
+    done = total = 0
+    # 1) video chưa đăng: chèn vào mô tả (cột F), đánh dấu ở cột L
+    for v in [v for v in load_videos() if v["status"] in ("Chờ duyệt", "Chờ đăng") and not v["mark"].startswith(AFF_MARK)]:
+        total += 1
+        picks = pick(v["title"], v["topic"], v["desc"], f"video{v['row']}")
+        if picks:
             sheet_put(f"'Noi dung'!F{v['row']}", [[v["desc"].rstrip() + affiliate_block(picks)]])
             sheet_put(f"'Noi dung'!L{v['row']}", [[AFF_MARK]])
             done += 1
         else:
             sheet_put(f"'Noi dung'!L{v['row']}", [[AFF_MARK + "-khong"]])
-    print(f"affiliate: xử lý {len(todo)} video, chèn link cho {done}")
+    # 2) bài viết chưa đăng: chèn cuối bài (cột C), đánh dấu ở cột H
+    posts_raw = sheet_get(f"'{POST_TAB}'!A2:H500")
+    for i, r in enumerate(posts_raw):
+        if cell(r, 5) not in ("Chờ duyệt", "Chờ đăng") or not cell(r, 2).strip() or cell(r, 7).startswith(AFF_MARK):
+            continue
+        row = i + 2
+        total += 1
+        picks = pick(cell(r, 1), cell(r, 1), cell(r, 2), f"post{row}")
+        if picks:
+            sheet_put(f"'{POST_TAB}'!C{row}", [[cell(r, 2).rstrip() + affiliate_block(picks)]])
+            sheet_put(f"'{POST_TAB}'!H{row}", [[AFF_MARK]])
+            done += 1
+        else:
+            sheet_put(f"'{POST_TAB}'!H{row}", [[AFF_MARK + "-khong"]])
+    print(f"affiliate: xử lý {total} mục, chèn link cho {done}")
 
 
 # ---------------------------------------------------------------- 3) gợi ý trả lời bình luận
