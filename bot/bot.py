@@ -445,8 +445,30 @@ def clean_post(text):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+STALE_HOURS = int(os.environ.get("STALE_HOURS", "36"))
+
+
+def expire_stale_posts(posts):
+    """Bài nháp quá STALE_HOURS giờ mà chưa duyệt thì tin đã cũ: chuyển sang Hủy để bot soạn bài mới."""
+    n = 0
+    for p in posts:
+        if p["status"] != "Chờ duyệt":
+            continue
+        try:
+            t = dt.datetime.strptime(p["date"][:16], "%d/%m/%Y %H:%M").replace(tzinfo=TZ)
+        except ValueError:
+            continue
+        if (now() - t).total_seconds() > STALE_HOURS * 3600:
+            sheet_put(f"'{POST_TAB}'!F{p['row']}:H{p['row']}", [["Hủy", p["link"], "Quá hạn chưa duyệt, tin đã cũ (bot tự hủy)"]])
+            p["status"] = "Hủy"
+            n += 1
+    if n:
+        print(f"draft_posts: tự hủy {n} bài nháp quá hạn")
+
+
 def task_draft_posts():
     posts = load_posts()
+    expire_stale_posts(posts)
     open_n = sum(1 for p in posts if p["status"] in ("Chờ duyệt", "Chờ đăng"))
     today = now().strftime("%d/%m/%Y")
     made_today = sum(1 for p in posts if p["date"].startswith(today))
