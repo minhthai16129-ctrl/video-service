@@ -74,6 +74,44 @@ def tts(text, path):
     print("voice gTTS", flush=True)
 
 
+
+MOODS = {
+    # (tần số hợp âm Hz, hệ số biên độ, lowpass, tremolo Hz, độ sâu tremolo, nhịp nhấn Hz hoặc 0)
+    "calm":   ([130.81, 164.81, 196.00, 246.94], [0.5, 0.35, 0.35, 0.2], 700, 0.15, 0.4, 0),
+    "bright": ([196.00, 246.94, 293.66, 440.00], [0.45, 0.35, 0.3, 0.12], 1200, 0.3, 0.35, 0),
+    "warm":   ([110.00, 164.81, 196.00, 261.63], [0.5, 0.35, 0.3, 0.2], 800, 0.2, 0.45, 0),
+    "tense":  ([73.42, 146.83, 174.61, 220.00, 311.13], [0.45, 0.4, 0.3, 0.25, 0.08], 600, 0.5, 0.5, 0),
+    "upbeat": ([130.81, 164.81, 196.00, 261.63], [0.45, 0.35, 0.35, 0.25], 1500, 0.2, 0.2, 1.8),
+}
+MOOD_WORDS = {
+    "tense": ["lừa đảo", "cảnh báo", "cảnh giác", "truy bắt", "phạm", "tai nạn", "vi phạm", "pháp luật", "nguy hiểm"],
+    "upbeat": ["bóng đá", "thể thao", "trận", "vô địch", "phim", "phòng vé", "khuấy đảo", "hat-trick", "ronaldo", "ngoại hạng"],
+    "calm": ["sức khỏe", "cúm", "thời tiết", "nghỉ lễ", "du lịch", "gia đình", "giấc ngủ", "tiết kiệm"],
+    "warm": ["giáo dục", "học sinh", "thầy cô", "người trẻ", "tuổi", "nhà", "tâm sự", "hiến tạng", "bệnh viện"],
+}
+
+
+def pick_mood(text, seed):
+    low = text.lower()
+    scores = {m: sum(low.count(w) for w in ws) for m, ws in MOOD_WORDS.items()}
+    best = max(scores, key=scores.get)
+    if scores[best] > 0:
+        return best
+    return list(MOODS)[seed % len(MOODS)]
+
+
+def music_expr(text, seed):
+    """Nhạc nền tạo bằng code, đổi theo chủ đề (mood) và cao độ ngẫu nhiên theo từng video."""
+    mood = pick_mood(text, seed)
+    freqs, amps, lp, trem_f, trem_d, pulse = MOODS[mood]
+    k = 2 ** (((seed // 5) % 5) / 12)  # lệch cao độ 0-4 nửa cung
+    parts = [f"{a}*sin(2*PI*{f * k:.2f}*t)" for f, a in zip(freqs, amps)]
+    expr = "+".join(parts)
+    if pulse:
+        expr = f"({expr})*(0.6+0.4*sin(PI*{pulse}*t)*sin(PI*{pulse}*t))"  # không dùng dấu phẩy trong biểu thức ffmpeg
+    return mood, expr, lp, trem_f, trem_d
+
+
 def duration(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                         "-of", "default=nw=1:nk=1", path], capture_output=True, text=True)
@@ -151,12 +189,13 @@ def render(job_id, title, script, tts_fn=tts, keywords=None, fetch_fn=fetch_imag
     total = duration(audio)
     try:
         mixed = f"{tmp}/mix.m4a"
-        chord = ("0.5*sin(2*PI*130.81*t)+0.35*sin(2*PI*164.81*t)+0.35*sin(2*PI*196*t)"
-                 "+0.2*sin(2*PI*261.63*t*(1+0.002*sin(2*PI*0.2*t)))")
+        seed = sum(map(ord, job_id))
+        mood, chord, lp, tf, td = music_expr(title + " " + script, seed)
+        print("music mood", mood, flush=True)
         subprocess.run(["ffmpeg", "-y", "-threads", "1", "-i", audio, "-f", "lavfi", "-i",
                         f"aevalsrc={chord}:s=24000:d={total + 1:.2f}",
                         "-filter_complex",
-                        "[1:a]lowpass=f=700,tremolo=f=0.15:d=0.4,volume=0.12,"
+                        f"[1:a]lowpass=f={lp},tremolo=f={tf}:d={td},volume=0.12,"
                         f"afade=t=in:d=2,afade=t=out:st={max(total - 2, 0):.2f}:d=2[m];"
                         "[0:a][m]amix=inputs=2:duration=first:normalize=0[o]",
                         "-map", "[o]", "-c:a", "aac", "-b:a", "96k", mixed],
