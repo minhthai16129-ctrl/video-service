@@ -1,6 +1,6 @@
 """Bot quản lý kênh: thống kê YouTube, chèn link tiếp thị, gợi ý trả lời bình luận, báo cáo tuần.
 
-Chạy: python bot/bot.py [stats|affiliate|comments|report|draft_posts|publish_posts|all]
+Chạy: python bot/bot.py [check_videos|stats|affiliate|comments|report|draft_posts|publish_posts|all]
 Với YouTube bot chỉ ĐỌC bằng khóa API công khai; không đăng, không trả lời, không sửa video.
 Bài viết Facebook: bot soạn nháp vào tab "Bai viet" (Chờ duyệt); chỉ đăng bài bạn đã chuyển sang "Chờ đăng".
 Mọi kết quả ghi vào Google Sheet để bạn duyệt.
@@ -119,7 +119,8 @@ def load_videos():
     for i, r in enumerate(rows):
         if not cell(r, 3):
             continue
-        out.append({"row": i + 2, "topic": cell(r, 2), "title": cell(r, 3), "desc": cell(r, 5),
+        out.append({"row": i + 2, "stt": cell(r, 0), "link": cell(r, 6),
+                    "topic": cell(r, 2), "title": cell(r, 3), "desc": cell(r, 5),
                     "status": cell(r, 8), "post": cell(r, 9), "mark": cell(r, 11), "yt": yt_id(cell(r, 9))})
     return out
 
@@ -137,6 +138,39 @@ def num(x):
         return int(x)
     except (TypeError, ValueError):
         return 0
+
+
+# ---------------------------------------------------------------- 0) kiểm tra link video
+def age_minutes(stt):
+    """STT dạng YYMMDDHHmm theo giờ Việt Nam → số phút đã trôi qua (None nếu không đọc được)."""
+    try:
+        t = dt.datetime.strptime(str(stt)[:10], "%y%m%d%H%M").replace(tzinfo=TZ)
+        return (now() - t).total_seconds() / 60
+    except ValueError:
+        return None
+
+
+def task_check_videos():
+    bad = 0
+    for v in load_videos():
+        if v["status"] not in ("Chờ duyệt", "Chờ đăng") or not v["link"].startswith("http"):
+            continue
+        age = age_minutes(v["stt"])
+        if age is not None and age < 20:
+            continue  # video có thể còn đang được tạo
+        try:
+            r = requests.head(v["link"], timeout=20, allow_redirects=True)
+            if r.status_code == 405:
+                r = requests.get(v["link"], timeout=20, stream=True)
+            missing = r.status_code >= 400
+        except requests.RequestException:
+            continue  # lỗi mạng tạm thời, để lần sau
+        if missing:
+            sheet_put(f"'Noi dung'!I{v['row']}", [["Lỗi"]])
+            sheet_put(f"'Noi dung'!K{v['row']}", [["Video chưa tạo được (file không tồn tại). Hãy bấm Tạo video mới."]])
+            bad += 1
+            print("check_videos: link hỏng ở hàng", v["row"])
+    print(f"check_videos: đánh dấu {bad} video lỗi")
 
 
 # ---------------------------------------------------------------- 1) thống kê
@@ -507,11 +541,12 @@ def task_publish_posts():
         raise
 
 
-TASKS = {"stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
+TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
          "draft_posts": task_draft_posts, "publish_posts": task_publish_posts}
 
 
-NEEDS = {"stats": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY"],
+NEEDS = {"check_videos": ["SHEET_ID", "GOOGLE_SA_JSON"],
+         "stats": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY"],
          "affiliate": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
          "comments": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY", "GEMINI_API_KEY"],
          "report": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
@@ -526,7 +561,7 @@ def gha_error(title, msg):
 
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    names = ["stats", "affiliate", "comments", "draft_posts"] if which == "all" else [which]
+    names = ["check_videos", "stats", "affiliate", "comments", "draft_posts"] if which == "all" else [which]
     failed = []
     for n in names:
         if n not in TASKS:

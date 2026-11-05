@@ -45,12 +45,20 @@ def wrap(line, width=22):
 VOICES = ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]
 
 
+def tts_gtts(text, path):
+    """Dự phòng khi edge-tts lỗi: giọng Google Dịch (kém tự nhiên hơn nhưng ổn định)."""
+    from gtts import gTTS
+    gTTS(text=text, lang="vi").save(path)
+    if os.path.getsize(path) <= 2000:
+        raise RuntimeError("gTTS empty audio")
+
+
 def tts(text, path):
     import edge_tts, time
     pick = VOICES[sum(map(ord, text[:40])) % len(VOICES)]
     last = None
-    for attempt in range(4):
-        voice = pick if attempt < 2 else VOICES[0]
+    for attempt in range(5):
+        voice = pick if attempt < 2 else VOICES[attempt % len(VOICES)]
         try:
             asyncio.run(edge_tts.Communicate(text, voice, rate="+6%").save(path))
             if os.path.getsize(path) > 2000:
@@ -59,8 +67,11 @@ def tts(text, path):
             last = RuntimeError("empty audio")
         except Exception as e:
             last = e
+            print("tts retry", attempt, str(e)[:120], flush=True)
         time.sleep(3 * (attempt + 1))
-    raise last
+    print("edge-tts hỏng, dùng giọng dự phòng gTTS:", str(last)[:120], flush=True)
+    tts_gtts(text, path)
+    print("voice gTTS", flush=True)
 
 
 def duration(path):
@@ -76,7 +87,17 @@ def fetch_one(i, kw, tmp):
         req = urllib.request.Request(
             f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={q}&image_type=photo&orientation=vertical&safesearch=true&per_page=6",
             headers={"User-Agent": "Mozilla/5.0"})
-        hits = json.loads(urllib.request.urlopen(req, timeout=20).read()).get("hits") or []
+        import time as _t
+        _t.sleep(i * 1.2)  # dãn cách các yêu cầu để không bị giới hạn tốc độ (HTTP 429)
+        hits = None
+        for attempt in range(4):
+            try:
+                hits = json.loads(urllib.request.urlopen(req, timeout=20).read()).get("hits") or []
+                break
+            except urllib.error.HTTPError as e:
+                if e.code != 429 or attempt == 3:
+                    raise
+                _t.sleep(4 * (attempt + 1))
         if not hits:
             return None
         url = hits[i % len(hits)].get("largeImageURL") or hits[0]["webformatURL"]
