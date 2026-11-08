@@ -574,11 +574,12 @@ def task_fb_check():
     ok = str(d.get("id")) == str(FB_PAGE)
     print(f"fb_check: token thuộc '{d.get('name')}' (id {d.get('id')}); khớp Page cấu hình: {'CÓ' if ok else 'KHÔNG'}")
     if not ok:
+        diag = []
         try:
             pr = requests.get(f"{FB_API}/me/permissions", params={"access_token": FB_TOKEN}, timeout=30).json()
-            print("fb_check: quyền:", ", ".join(f"{x.get('permission')}:{x.get('status')}" for x in pr.get("data", [])) or str(pr)[:150])
+            diag.append("quyen=" + ",".join(f"{x.get('permission')}:{x.get('status')}" for x in pr.get("data", [])))
             pg = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id,name,access_token", "access_token": FB_TOKEN}, timeout=30).json()
-            print("fb_check: đọc Page:", {k: ("(có)" if k == "access_token" else v) for k, v in pg.items()} if "error" not in pg else pg["error"].get("message", "")[:200])
+            diag.append("doc_page=" + (str({k: ("(co)" if k == "access_token" else v) for k, v in pg.items()}) if "error" not in pg else pg["error"].get("message", "")[:160]))
         except Exception as e:
             print("fb_check: lỗi chẩn đoán", str(e)[:100])
         try:
@@ -587,7 +588,7 @@ def task_fb_check():
         except Exception as e:
             pages = str(e)[:100]
         print("fb_check: các Page token này quản lý được:", pages)
-        raise RuntimeError(f"Token thuộc '{d.get('name')}' (id {d.get('id')}), không phải Page {FB_PAGE}. Page: " + pages)
+        raise RuntimeError(f"Token thuộc '{d.get('name')}' (id {d.get('id')}), không phải Page {FB_PAGE}. " + " | ".join(diag) + " | accounts=" + pages)
 
 
 TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
