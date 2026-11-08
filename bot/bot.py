@@ -511,10 +511,27 @@ def in_peak():
     return any(a <= t <= b for a, b in PEAK)
 
 
+_PAGE_TOKEN = None
+
+
+def page_token():
+    """FB_PAGE_TOKEN có thể là mã người dùng: tự đổi sang mã của Page (qua GET /{page}?fields=access_token)."""
+    global _PAGE_TOKEN
+    if _PAGE_TOKEN:
+        return _PAGE_TOKEN
+    if not FB_TOKEN:
+        raise RuntimeError("thiếu FB_PAGE_TOKEN")
+    r = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id,name,access_token", "access_token": FB_TOKEN}, timeout=30)
+    d = r.json() if r.ok else {}
+    _PAGE_TOKEN = d.get("access_token") or FB_TOKEN
+    return _PAGE_TOKEN
+
+
 def fb_post(text, img_url):
     """Đăng lên Page. Có ảnh thì tải ảnh về rồi tải lên (không phụ thuộc hotlink). Trả về (id, link)."""
     if not FB_TOKEN:
         raise RuntimeError("thiếu FB_PAGE_TOKEN")
+    tok = page_token()
     if img_url:
         try:
             img = requests.get(img_url, timeout=30)
@@ -531,7 +548,7 @@ def fb_post(text, img_url):
             d = r.json()
             pid = d.get("post_id") or d.get("id", "")
             return pid, f"https://www.facebook.com/{pid}"
-    r = requests.post(f"{FB_API}/{FB_PAGE}/feed", data={"message": text, "access_token": FB_TOKEN}, timeout=60)
+    r = requests.post(f"{FB_API}/{FB_PAGE}/feed", data={"message": text, "access_token": tok}, timeout=60)
     if not r.ok:
         raise RuntimeError(f"Facebook {r.status_code}: {r.text[:300]}")
     pid = r.json().get("id", "")
@@ -567,28 +584,16 @@ def task_fb_check():
     """Kiểm tra FB_PAGE_TOKEN: chỉ đọc, không đăng gì, không in token."""
     if not FB_TOKEN:
         raise RuntimeError("thiếu FB_PAGE_TOKEN")
-    r = requests.get(f"{FB_API}/me", params={"fields": "id,name", "access_token": FB_TOKEN}, timeout=30)
+    r = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id,name,access_token", "access_token": FB_TOKEN}, timeout=30)
     if not r.ok:
-        raise RuntimeError(f"Facebook {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"Không đọc được Page {FB_PAGE}: {r.status_code} {r.text[:200]}")
     d = r.json()
-    ok = str(d.get("id")) == str(FB_PAGE)
-    print(f"fb_check: token thuộc '{d.get('name')}' (id {d.get('id')}); khớp Page cấu hình: {'CÓ' if ok else 'KHÔNG'}")
-    if not ok:
-        diag = []
-        try:
-            pr = requests.get(f"{FB_API}/me/permissions", params={"access_token": FB_TOKEN}, timeout=30).json()
-            diag.append("quyen=" + ",".join(f"{x.get('permission')}:{x.get('status')}" for x in pr.get("data", [])))
-            pg = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id,name,access_token", "access_token": FB_TOKEN}, timeout=30).json()
-            diag.append("doc_page=" + (str({k: ("(co)" if k == "access_token" else v) for k, v in pg.items()}) if "error" not in pg else pg["error"].get("message", "")[:160]))
-        except Exception as e:
-            print("fb_check: lỗi chẩn đoán", str(e)[:100])
-        try:
-            a = requests.get(f"{FB_API}/me/accounts", params={"fields": "id,name", "access_token": FB_TOKEN}, timeout=30).json()
-            pages = "; ".join(f"{x.get('name')}={x.get('id')}" for x in a.get("data", [])) or str(a)[:150]
-        except Exception as e:
-            pages = str(e)[:100]
-        print("fb_check: các Page token này quản lý được:", pages)
-        raise RuntimeError(f"Token thuộc '{d.get('name')}' (id {d.get('id')}), không phải Page {FB_PAGE}. " + " | ".join(diag) + " | accounts=" + pages)
+    if not d.get("access_token"):
+        raise RuntimeError(f"Đọc được Page '{d.get('name')}' nhưng không lấy được mã Page (thiếu quyền quản trị)")
+    me = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id", "access_token": d["access_token"]}, timeout=30)
+    print(f"fb_check: OK - Page '{d.get('name')}' (id {d.get('id')}), lấy được mã Page; kiểm tra mã Page: {me.status_code}")
+    if not me.ok:
+        raise RuntimeError("Mã Page lấy được nhưng không dùng được")
 
 
 TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
