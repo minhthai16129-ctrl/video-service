@@ -574,7 +574,7 @@ def task_fb_check():
     ok = str(d.get("id")) == str(FB_PAGE)
     print(f"fb_check: token thuộc '{d.get('name')}' (id {d.get('id')}); khớp Page cấu hình: {'CÓ' if ok else 'KHÔNG'}")
     if not ok:
-        raise RuntimeError("Token không phải Page Access Token của Page cấu hình")
+        raise RuntimeError(f"Token thuộc '{d.get('name')}' (id {d.get('id')}), không phải Page {FB_PAGE}")
 
 
 TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
