@@ -563,8 +563,22 @@ def task_publish_posts():
         raise
 
 
+def task_fb_check():
+    """Kiểm tra FB_PAGE_TOKEN: chỉ đọc, không đăng gì, không in token."""
+    if not FB_TOKEN:
+        raise RuntimeError("thiếu FB_PAGE_TOKEN")
+    r = requests.get(f"{FB_API}/me", params={"fields": "id,name", "access_token": FB_TOKEN}, timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"Facebook {r.status_code}: {r.text[:300]}")
+    d = r.json()
+    ok = str(d.get("id")) == str(FB_PAGE)
+    print(f"fb_check: token thuộc '{d.get('name')}' (id {d.get('id')}); khớp Page cấu hình: {'CÓ' if ok else 'KHÔNG'}")
+    if not ok:
+        raise RuntimeError("Token không phải Page Access Token của Page cấu hình")
+
+
 TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
-         "draft_posts": task_draft_posts, "publish_posts": task_publish_posts}
+         "draft_posts": task_draft_posts, "publish_posts": task_publish_posts, "fb_check": task_fb_check}
 
 
 NEEDS = {"check_videos": ["SHEET_ID", "GOOGLE_SA_JSON"],
@@ -573,7 +587,8 @@ NEEDS = {"check_videos": ["SHEET_ID", "GOOGLE_SA_JSON"],
          "comments": ["SHEET_ID", "GOOGLE_SA_JSON", "YOUTUBE_API_KEY", "GEMINI_API_KEY"],
          "report": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
          "draft_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
-         "publish_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "FB_PAGE_TOKEN"]}
+         "publish_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "FB_PAGE_TOKEN"],
+         "fb_check": ["FB_PAGE_TOKEN"]}
 
 
 def gha_error(title, msg):
