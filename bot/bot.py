@@ -596,8 +596,22 @@ def task_fb_check():
         raise RuntimeError("Mã Page lấy được nhưng không dùng được")
 
 
+def task_ping_render():
+    """Gọi thử máy chủ dựng video (chỉ GET, không dựng gì) để xem có đang chạy không."""
+    import time as _t
+    out = []
+    for u in ("https://kenh-ai-video.onrender.com/", "https://kenh-ai-video.onrender.com/health"):
+        t0 = _t.time()
+        try:
+            r = requests.get(u, timeout=150)
+            out.append(f"{u} -> {r.status_code} sau {_t.time()-t0:.0f}s: {r.text[:100]!r}")
+        except Exception as e:
+            out.append(f"{u} -> LỖI sau {_t.time()-t0:.0f}s: {str(e)[:120]}")
+    raise RuntimeError("PING: " + " || ".join(out))  # cố ý báo qua annotation để đọc được
+
+
 TASKS = {"check_videos": task_check_videos, "stats": task_stats, "affiliate": task_affiliate, "comments": task_comments, "report": task_report,
-         "draft_posts": task_draft_posts, "publish_posts": task_publish_posts, "fb_check": task_fb_check}
+         "draft_posts": task_draft_posts, "publish_posts": task_publish_posts, "fb_check": task_fb_check, "ping_render": task_ping_render}
 
 
 NEEDS = {"check_videos": ["SHEET_ID", "GOOGLE_SA_JSON"],
@@ -607,7 +621,7 @@ NEEDS = {"check_videos": ["SHEET_ID", "GOOGLE_SA_JSON"],
          "report": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
          "draft_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "GEMINI_API_KEY"],
          "publish_posts": ["SHEET_ID", "GOOGLE_SA_JSON", "FB_PAGE_TOKEN"],
-         "fb_check": ["FB_PAGE_TOKEN"]}
+         "fb_check": ["FB_PAGE_TOKEN"], "ping_render": []}
 
 
 def gha_error(title, msg):
