@@ -555,7 +555,13 @@ def fb_post(text, img_url):
     return pid, f"https://www.facebook.com/{pid}"
 
 
+BOT_PUBLISH = os.environ.get("BOT_PUBLISH") == "1"  # mặc định TẮT: Make B là nơi duy nhất đăng bài (tránh đăng trùng)
+
+
 def task_publish_posts():
+    if not BOT_PUBLISH:
+        print("publish_posts: đã tắt (Make B đăng bài). Đặt BOT_PUBLISH=1 nếu muốn bot đăng thay Make.")
+        return
     force = os.environ.get("FORCE_PUBLISH") == "1"
     if not force and not in_peak():
         print("publish_posts: ngoài khung giờ đông người xem, để lần sau")
