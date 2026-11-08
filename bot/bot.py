@@ -575,6 +575,13 @@ def task_fb_check():
     print(f"fb_check: token thuộc '{d.get('name')}' (id {d.get('id')}); khớp Page cấu hình: {'CÓ' if ok else 'KHÔNG'}")
     if not ok:
         try:
+            pr = requests.get(f"{FB_API}/me/permissions", params={"access_token": FB_TOKEN}, timeout=30).json()
+            print("fb_check: quyền:", ", ".join(f"{x.get('permission')}:{x.get('status')}" for x in pr.get("data", [])) or str(pr)[:150])
+            pg = requests.get(f"{FB_API}/{FB_PAGE}", params={"fields": "id,name,access_token", "access_token": FB_TOKEN}, timeout=30).json()
+            print("fb_check: đọc Page:", {k: ("(có)" if k == "access_token" else v) for k, v in pg.items()} if "error" not in pg else pg["error"].get("message", "")[:200])
+        except Exception as e:
+            print("fb_check: lỗi chẩn đoán", str(e)[:100])
+        try:
             a = requests.get(f"{FB_API}/me/accounts", params={"fields": "id,name", "access_token": FB_TOKEN}, timeout=30).json()
             pages = "; ".join(f"{x.get('name')}={x.get('id')}" for x in a.get("data", [])) or str(a)[:150]
         except Exception as e:
