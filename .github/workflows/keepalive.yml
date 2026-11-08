@@ -1,0 +1,16 @@
+name: Giữ máy chủ video luôn thức
+
+# Render gói miễn phí tự "ngủ" sau 15 phút không có người gọi, và lần đánh thức đầu tiên đôi khi bị treo
+# làm Make A hết thời gian chờ. Gọi nhẹ mỗi 10 phút để máy chủ luôn sẵn sàng (repo công khai nên không tốn phút Actions).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Gọi máy chủ video
+        run: curl -sS -m 90 --retry 2 --retry-delay 5 -o /dev/null -w "HTTP %{http_code} sau %{time_total}s\n" https://kenh-ai-video.onrender.com/ || echo "không phản hồi, lần sau thử lại"
